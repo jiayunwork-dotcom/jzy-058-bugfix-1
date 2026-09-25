@@ -204,6 +204,56 @@ def test_scan_last_point_never_exceeds_stop():
     assert points == [Decimal("0.10"), Decimal("0.25")]
 
 
+def test_scan_stop_not_exceeded_when_remainder_reaches_half_step():
+    """复现缺陷：0.1→0.38、步长 0.1，余量 0.08 已达半步以上。
+
+    约定末点只能是不越过终点的最后一个网格点（向下取整）；
+    0.4 已越过 0.38，绝不允许出现在结果里。
+    """
+    scan_range = build_dilution_range(start=0.1, stop=0.38, step=0.1)
+    solutions = scan_dilution(params(), scan_range)
+    dilutions = [str(s.dilution) for s in solutions]
+    assert dilutions == ["0.1", "0.2", "0.3"]
+    assert all(s.dilution <= Decimal("0.38") for s in solutions)
+
+
+@pytest.mark.parametrize(
+    "start,stop,step,expected_last",
+    [
+        # 整数倍区间：末点正好落在终点上
+        ("0.1", "0.5", "0.1", "0.5"),
+        ("0.1", "0.4", "0.15", "0.4"),
+        # 非整数倍、余量达到或超过半步：向下取整，绝不向上凑出越界点
+        ("0.1", "0.38", "0.1", "0.3"),
+        ("0.1", "0.35", "0.1", "0.3"),  # 恰好半步，同样向下取整
+        # 非整数倍、余量不足半步
+        ("0.1", "0.34", "0.1", "0.3"),
+        # 单点区间与步长大于区间宽度
+        ("0.3", "0.3", "0.1", "0.3"),
+        ("0.1", "0.2", "0.5", "0.1"),
+    ],
+)
+def test_scan_last_point_is_floor_grid_point_never_beyond_stop(
+    start, stop, step, expected_last
+):
+    """不变量：任何扫描点都不得越过终点，末点恰为向下取整的网格点。"""
+    scan_range = build_dilution_range(start=start, stop=stop, step=step)
+    solutions = scan_dilution(params(), scan_range)
+    dilutions = [s.dilution for s in solutions]
+    stop_dec = Decimal(stop)
+    step_dec = Decimal(step)
+
+    # 1) 不变量本体：所有点都落在 [start, stop] 闭区间内
+    assert dilutions[0] == Decimal(start)
+    assert all(d <= stop_dec for d in dilutions)
+    # 2) 末点是不越过终点的最后一个网格点：再迈一步必然越界
+    assert dilutions[-1] == Decimal(expected_last)
+    assert dilutions[-1] + step_dec > stop_dec
+    # 3) 点列严格按步长等距，没有偷偷插入或丢弃网格点
+    for prev, nxt in zip(dilutions, dilutions[1:]):
+        assert nxt - prev == step_dec
+
+
 def test_scan_rejects_non_positive_step_and_inverted_range():
     with pytest.raises(ParameterValidationError) as exc_info:
         build_dilution_range(start=0.5, stop=0.1, step=0.1)
