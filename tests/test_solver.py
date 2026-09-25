@@ -204,6 +204,49 @@ def test_scan_last_point_never_exceeds_stop():
     assert points == [Decimal("0.10"), Decimal("0.25")]
 
 
+def test_scan_remainder_over_half_step_does_not_round_up():
+    """复现缺陷：0.1→0.38、步长 0.1，余量 0.8 步 ≥ 半步。
+
+    末点必须向下取整到 0.3；0.4 已越过终点 0.38，绝不允许出现，
+    更不得把越界工况代入稳态求解混进结果。
+    """
+    scan_range = build_dilution_range(start=0.1, stop=0.38, step=0.1)
+    solutions = scan_dilution(params(), scan_range)
+    dilutions = [s.dilution for s in solutions]
+    assert dilutions == [Decimal("0.1"), Decimal("0.2"), Decimal("0.3")]
+    assert all(d <= Decimal("0.38") for d in dilutions)
+
+
+@pytest.mark.parametrize(
+    "start,stop,step,expected_last",
+    [
+        # 整数倍区间：末点正好落在终点上
+        ("0.1", "0.5", "0.1", "0.5"),
+        ("0.05", "0.5", "0.05", "0.5"),
+        # 非整数倍、余量不足半步：末点停在终点之内
+        ("0.1", "0.34", "0.1", "0.3"),
+        # 非整数倍、余量恰好半步：向下取整，不向上凑
+        ("0.1", "0.35", "0.1", "0.3"),
+        # 非整数倍、余量超过半步：同样向下取整，绝不越界
+        ("0.1", "0.38", "0.1", "0.3"),
+        ("0.1", "0.399", "0.1", "0.3"),
+        # 单点区间：步长大于区间宽度，只有起点一个点
+        ("0.2", "0.25", "0.1", "0.2"),
+    ],
+)
+def test_scan_points_never_exceed_stop_invariant(start, stop, step, expected_last):
+    """不变量：点列全部落在 [start, stop] 内，末点为不越过终点的最后网格点。"""
+    scan_range = build_dilution_range(start=start, stop=stop, step=step)
+    solutions = scan_dilution(params(), scan_range)
+    dilutions = [s.dilution for s in solutions]
+    stop_dec = Decimal(stop)
+    assert dilutions[0] == Decimal(start)
+    assert all(d <= stop_dec for d in dilutions)
+    assert dilutions[-1] == Decimal(expected_last)
+    # 末点确为向下取整的网格点：再迈一步必然越界
+    assert dilutions[-1] + Decimal(step) > stop_dec
+
+
 def test_scan_rejects_non_positive_step_and_inverted_range():
     with pytest.raises(ParameterValidationError) as exc_info:
         build_dilution_range(start=0.5, stop=0.1, step=0.1)

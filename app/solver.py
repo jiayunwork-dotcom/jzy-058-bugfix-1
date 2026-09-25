@@ -19,7 +19,7 @@
 """
 
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_FLOOR
 from math import isfinite
 from typing import Any, Iterable
 
@@ -256,10 +256,12 @@ def build_dilution_range(
 
 def _scan_points(scan_range: DilutionRange) -> Iterable[Decimal]:
     """生成扫描点：D_i = start + i·step，且保证末点不越过 stop。"""
+    # 与 build_dilution_range 的点数核算同一口径：整步数一律向下取整，
+    # 末尾余量即使达到或超过半个步长也不向上凑，末点绝不越过 stop。
     steps = int(
         (
             (scan_range.stop - scan_range.start) / scan_range.step
-        ).to_integral_value(rounding=ROUND_HALF_UP)
+        ).to_integral_value(rounding=ROUND_FLOOR)
     )
     for i in range(steps + 1):
         yield scan_range.start + scan_range.step * i
